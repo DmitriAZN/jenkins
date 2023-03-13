@@ -1,0 +1,47 @@
+node {
+stage 'Checkout'
+  cleanWs()
+  checkout scm stage 'Build'
+  sh "dotnet restore \"${workspace}/VIDV.sln\""
+  sh "dotnet build \"${workspace}/VIDV.sln\"" stage 'UnitTests'
+  sh returnStatus: true, script: "dotnet test \"${workspace}/VIDV.sln\" --logger \"trx;LogFileName=unit_tests.xml\" --no-build"
+  step([$class: 'MSTestPublisher', testResultsFile:"**/unit_tests.xml", failOnError: true, keepLongStdio: true])
+  def allTestPassed = allTestPass()
+  if(allTestPassed == false)
+  {
+   //notifyBitbucket('FAILED')
+   assert false
+  }
+  else
+  {
+   //notifyBitbucket('SUCCESS')
+  }
+stage 'Docker build and push'
+     def vidvImage = docker.build("vidvdocker.azurecr.io/vidvimage:${env.BUILD_ID}", " -f ./EntryPoint/Dockerfile .")
+     docker.withRegistry('https://vidvdocker.azurecr.io','azr-cred') 
+     {
+         vidvImage.push()
+     }
+} def allTestPass() {
+    def testStatus = ""
+def allTestPass = 0
+    AbstractTestResultAction testResultAction = currentBuild.rawBuild.getAction(AbstractTestResultAction.class)
+    if (testResultAction != null) {
+        def total = testResultAction.totalCount
+        def failed = testResultAction.failCount
+        def skipped = testResultAction.skipCount
+        def passed = total - failed - skipped
+        testStatus = "Test Status:\n  Passed: ${passed}, Failed: ${failed} ${testResultAction.failureDiffString}, Skipped: ${skipped}"
+        if (failed == 0) {
+            currentBuild.result = 'SUCCESS'
+        }
+  allTestPass = (failed == 0)
+    }
+else
+{
+  testStatus = "Didn't find any tests..."
+  allTestPass = false
+}
+println testStatus
+    return allTestPass
+}
